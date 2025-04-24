@@ -1,0 +1,1 @@
+docker rm -f $(docker ps -aqf "ancestor=stockfish-api") && docker rmi -f stockfish-api && docker build -t stockfish-api . && docker run -d -p 5001:5000 stockfish-api
