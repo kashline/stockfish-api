@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 import subprocess
 import logging
 
@@ -6,6 +7,7 @@ import logging
 logging.basicConfig(level=logging.DEBUG)
 
 app = Flask(__name__)
+CORS(app)
 stockfish_path = "/opt/Stockfish/src/stockfish"
 
 def run_stockfish(commands: list[str]) -> list[str]:
@@ -60,6 +62,40 @@ def evaluate():
     ]
     output = run_stockfish(cmds)
     return jsonify({"output": output})
+
+@app.route('/makemove', methods=['POST'])
+def make_move():
+    data = request.get_json()
+    fen = data.get('fen')
+    if not fen:
+        return jsonify({"error": "Missing 'fen' in request"}), 400
+    
+    commands = [
+        "uci",
+        "isready",
+        "setoption name MultiPV value 1",
+        f"position fen {fen}",
+        "go depth 20"
+    ]
+    stockfish_output = run_stockfish(commands)
+    best_move = None
+
+    # Parse the output to get best move and evaluation
+    for line in stockfish_output:
+        if line.startswith("bestmove"):
+            best_move = line.split()[1]
+        if line.startswith("info"):
+            if "score" in line:
+                # Extract centipawn score if available
+                if "cp" in line:
+                    best_score = int(line.split("score cp")[1].split()[0])
+                # Extract mate score if available
+                elif "mate" in line:
+                    best_score = int(line.split("score mate")[1].split()[0])
+    return jsonify({
+        "best_move": best_move,
+    })
+
 
 @app.route('/evaluatemove', methods=['POST'])
 def evaluate_move():
@@ -133,8 +169,10 @@ def evaluate_move():
         rating = "Inaccuracy"
     elif score_diff <= 400:
         rating = "Mistake"
-    else:
+    elif score_diff <= 999:
         rating = "Blunder"
+    else:
+        rating = "CRITICAL BLUNDER"
 
     return jsonify({
         "player_move": move,

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-API_URL="localhost:5001/evaluatemove"
+API_URL="http://localhost:5001/evaluatemove"
 test_cases=(
     "rnbqkbnr/ppp2ppp/8/3p4/4P3/8/PPP2PPP/RNBQKBNR b KQkq - 0 1 d5d4"
     "rnbqkbnr/ppp2ppp/8/3p4/4P3/8/PPP2PPP/RNBQKBNR w KQkq - 0 1 g1f3"
