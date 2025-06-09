@@ -19,13 +19,11 @@ def run_stockfish(commands: list[str]) -> list[str]:
         text=True,
         bufsize=1  # line buffered
     )
-
     output_lines = []
 
     for command in commands:
         process.stdin.write(command + "\n")
         process.stdin.flush()
-
     # Read until we see "bestmove"
     while True:
         line = process.stdout.readline()
@@ -42,6 +40,37 @@ def run_stockfish(commands: list[str]) -> list[str]:
     process.stdin.flush()
     process.wait()
 
+    return output_lines
+
+def run_stockfish_unfil(commands: list[str], terminator: str) -> list[str]:
+    process = subprocess.Popen(
+        [stockfish_path],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1  # line buffered
+    )
+    output_lines = []
+
+    for command in commands:
+        process.stdin.write(command + "\n")
+        process.stdin.flush()
+    while True:
+        line = process.stdout.readline()
+        if line == '':
+            break  # Process terminated or pipe closed unexpectedly
+        line = line.strip()
+        if line:
+            output_lines.append(line)
+        if terminator in line:
+            break 
+
+    # Now quit Stockfish nicely
+    process.stdin.write("quit\n")
+    process.stdin.flush()
+    process.wait()
+    
     return output_lines
 
 @app.route('/')
@@ -62,6 +91,20 @@ def evaluate():
     ]
     output = run_stockfish(cmds)
     return jsonify({"output": output})
+
+@app.route('/legal_moves', methods=['POST'])
+def legal_moves():
+    data = request.get_json()
+    fen = data.get("fen", "")
+    cmds = [
+        "uci",
+        "isready",
+        f"position fen {fen}",
+        "go perft 1"
+    ]
+    output = run_stockfish_unfil(cmds, "Nodes searched:")
+
+    return jsonify({"legal_moves": extract_moves(output)})
 
 @app.route('/makemove', methods=['POST'])
 def make_move():
@@ -181,11 +224,52 @@ def evaluate_move():
         "rating": rating
     })
 
+def extract_moves(lines):
+    moves = []
+    for line in lines:
+        # Check if line contains ':' and looks like a move (4 characters before ':')
+        if ":" in line:
+            move_part = line.split(":")[0]
+            # Move should start with a letter and be exactly 4 characters long (e.g., 'e2e4')
+            if move_part[0].isalpha() and len(move_part) == 4:
+                moves.append(move_part)
+    return moves
+
 def parse_bestmove(output: str) -> str:
     for line in output.splitlines():
         if line.startswith("bestmove"):
             return line.split()[1]
     return ""
+
+@app.route("/move", methods=["POST"])
+def move():
+    data = request.json
+    fen = data.get("fen")
+    move = data.get("move")
+
+    if not fen or not move:
+        return jsonify({"error": "Missing FEN or move"}), 400
+    try:
+        commands = [
+            "uci",
+            "isready",
+            f"position fen {fen} moves {move}",
+            "d"
+        ]
+
+        output = run_stockfish_unfil(commands, "Checkers:")
+        new_fen = None
+        for line in output:
+            if line.startswith("Fen: "):
+                new_fen = line.removeprefix("Fen: ").strip()
+                break
+
+        if not new_fen:
+            return jsonify({"error": "FEN not found in Stockfish output"}), 500
+        return jsonify({"fen": new_fen})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
